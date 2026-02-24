@@ -505,6 +505,57 @@ Episode Execution
                     └────────────────────┘
 ```
 
+#### 配置数据流说明
+
+```
+配置数据流: Benchmark Config → ScenarioConfig → Simulator/Scene Manager
+                     ↓                    ↓              ↓
+              ┌──────────────┐    ┌──────────────┐  ┌──────────────┐
+              │ RobotConfig  │    │ ObjectConfig │  │  DRConfig    │
+              │ (机器人配置)  │    │  (物体配置)   │  │  (域随机化)   │
+              └──────────────┘    └──────────────┘  └──────────────┘
+                     ↓                    ↓              ↓
+              场景初始化参数 → 场景物体生成 → 域随机化应用
+```
+
+**说明**:
+- `ScenarioConfig` 及其子配置（RobotConfig、ObjectConfig、DRConfig）作为配置数据结构，
+  通过 Benchmark Config 传递给仿真引擎的 Scene Manager
+- Scene Manager 负责加载场景、配置机器人、放置物体并应用域随机化参数
+- 配置概念的详细定义参见 1.4 节"领域概念定义"，配置层次参见 3.6 节"配置系统"
+
+#### 模块功能范围说明
+
+**1. 评测编排层 (EVALUATION ORCHESTRATOR)**
+
+| 模块 | 功能范围 |
+|------|----------|
+| **BenchmarkRunner** | • 加载和解析Benchmark配置（含ScenarioConfig）<br>• 初始化评测环境（数据集、任务、指标、场景配置）<br>• 管理单个Benchmark的完整生命周期<br>• 触发Episode执行流程<br>• 收集最终评测结果 |
+| **EpisodeManager** | • 管理Episode序列的加载和分发<br>• 维护Episode执行状态（PENDING/RUNNING/COMPLETED/FAILED）<br>• 负载均衡：将Episode分配给可用Worker<br>• 跟踪评测进度和失败重试<br>• 生成Episode执行报告 |
+| **MetricsAggregator** | • 实时收集每个Episode的指标结果<br>• 计算聚合统计量（均值、标准差、分位数）<br>• 生成JSON格式的评测报告<br>• 按场景/指令类型等维度分组统计<br>• 导出轨迹数据供后续分析 |
+
+**2. 仿真引擎层 (SIMULATION ENGINE LAYER)**
+
+| 模块 | 功能范围 |
+|------|----------|
+| **Scene Manager** | • 接收和应用ScenarioConfig配置<br>• 加载和管理3D场景数据（从Scene Dataset）<br>• 应用RobotConfig：初始化机器人Agent（位置、传感器、动作空间）<br>• 应用ObjectConfig：生成和放置场景物体（目标、障碍物）<br>• 应用DRConfig：执行域随机化（场景/材质/灯光/相机）<br>• 场景缓存和预加载优化<br>• 场景资源生命周期管理<br>• 支持多场景并发访问<br>• 提供场景查询接口（可达性、区域信息） |
+| **Agent Manager** | • 管理Agent状态（位置、旋转、速度）<br>• 执行动作并更新Agent状态<br>• 碰撞检测和边界约束<br>• 动作空间验证（离散/连续）<br>• 轨迹记录和状态快照 |
+| **Sensor Suite** | • 传感器配置管理（类型、分辨率、视野）<br>• 生成多模态观测数据：RGB图像、深度图<br>• 位置传感器：GPS坐标、Compass朝向<br>• 任务传感器：自然语言指令<br>• 可选扩展：语义分割、 Instance ID |
+| **Metrics Module** | • Episode初始化时重置指标状态<br>• 每步更新指标（记录轨迹、计算距离）<br>• 实时跟踪中间指标值<br>• Episode结束时计算最终指标<br>• 提供指标查询接口（Success、SPL、DTW等） |
+
+**3. 通信接口层 (API INTERFACE LAYER)**
+
+| 模块 | 功能范围 |
+|------|----------|
+| **Remote Agent Client** | • 与参赛者推理服务建立通信连接<br>• 协议适配：REST/gRPC/WebSocket<br>• 请求序列化：Episode、Observation → JSON/Protobuf<br>• 响应反序列化：Action → 内部数据结构<br>• 超时处理和错误重试机制<br>• 连接健康检查和心跳保活 |
+
+**4. 推理服务层 (PARTICIPANT'S INFERENCE SERVICE)** - 外部模块
+
+| 组件 | 功能范围 |
+|------|----------|
+| **参赛者Agent实现** | • 接收Observation并输出Action<br>• 维护内部状态（RNN隐藏层、地图等）<br>• 实现导航策略（模型推理/规划算法）<br>• 通过API接口暴露服务 |
+
+
 ### 2.2 分层架构说明
 
 | 层级 | 职责 | 关键组件 |
