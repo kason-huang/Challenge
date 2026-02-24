@@ -27,6 +27,9 @@
 | **Task（任务）** | 导航任务的抽象定义，描述要解决什么问题 | 定义动作空间、观测空间、目标条件 | VLN, ObjectNav, ImageNav |
 | **Benchmark（基准）** | 用于评测的一组Episode集合和评测规则 | 组织Episode、定义评测配置、输出结果 | "VLN Challenge 2024 - val_seen" |
 | **Episode（回合/场景）** | 单次评测任务实例，包含初始状态和目标 | 描述场景、起点、终点、指令 | episode_001: "从卧室走到厨房" |
+| **ScenarioConfig（场景配置）** | 场景的参数化配置，定义环境要素 | 配置机器人、物体、域随机化参数 | RobotCfg, ObjectConfig, DRConfig |
+| **RobotConfig（机器人配置）** | 单个机器人的完整配置 | 定义机器人模型、关节、传感器 | Franka, Stretch, Spot |
+| **ObjectConfig（物体配置）** | 场景物体的配置 | 定义物体类型、位置、物理属性 | TargetObject, Obstacle |
 | **Simulator（仿真器）** | 模拟物理环境和传感器观测的引擎 | 渲染场景、计算物理、生成观测 | Custom Simulator |
 | **Agent（代理/智能体）** | 执行导航决策的实体，由参赛者实现 | 接收观测、输出动作 | Team XYZ's VLNAgent |
 | **Metric（指标）** | 衡量Agent性能的量化标准 | 计算单次或聚合性能值 | Success, SPL, DTW |
@@ -50,6 +53,14 @@
 │  │  │  Action     │  │  Sensor     │  │  Metric              ││ │
 │  │  │  Space      │  │  Suite      │  │  Definitions         ││ │
 │  │  └─────────────┘  └─────────────┘  └─────────────────────┘│ │
+│  └───────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              ScenarioConfig（场景配置）                   │ │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐ │ │
+│  │  │  RobotCfg   │  │ ObjectCfg    │  │   DRConfig       │ │ │
+│  │  │  (机器人配置) │  │  (物体配置)   │  │  (域随机化)       │ │ │
+│  │  └──────────────┘  └──────────────┘  └──────────────────┘ │ │
 │  └───────────────────────────────────────────────────────────┘ │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐ │
@@ -108,6 +119,10 @@
 Configuration
 ├── Task Config (定义任务规则)
 ├── Benchmark Config (定义评测集合)
+├── ScenarioConfig (定义场景配置)
+│   ├── RobotConfig (机器人配置)
+│   ├── ObjectConfig (物体配置)
+│   └── DRConfig (域随机化配置)
 └── Simulator Config (定义仿真参数)
 ```
 
@@ -152,9 +167,15 @@ Episode Execution
 | 依赖关系 | 描述 |
 |----------|------|
 | **Benchmark → Task** | Benchmark必须指定一个Task类型 |
+| **Benchmark → ScenarioConfig** | Benchmark包含场景配置参数 |
 | **Benchmark → Task Dataset** | Benchmark引用任务数据集的特定split |
+| **ScenarioConfig → RobotConfig** | 场景配置包含机器人配置 |
+| **ScenarioConfig → ObjectConfig** | 场景配置包含物体配置（如需要） |
+| **ScenarioConfig → DRConfig** | 场景配置包含域随机化配置 |
 | **Task Dataset → Scene Dataset** | Task Dataset中的Episode引用Scene Dataset中的场景 |
+| **Episode → ScenarioConfig** | Episode可引用场景配置参数 |
 | **Simulator → Scene Dataset** | Simulator加载Scene Dataset中的3D场景模型 |
+| **Simulator → ScenarioConfig** | Simulator使用场景配置初始化环境 |
 | **Episode → Simulator** | Episode执行需要Simulator实例 |
 | **Episode → Agent** | Episode需要Agent做出决策 |
 | **Agent → Task** | Agent必须符合Task的动作/观测空间 |
@@ -301,12 +322,133 @@ Episode Execution
   - Agent行为分析和调试
   - 评测结果归档和可视化
 
+**ScenarioConfig（场景配置）**
+- **是什么**: 场景的参数化配置，定义评测环境的所有要素
+- **设计参考**: 参考RoboTwin和Roboverse的ScenarioCfg设计模式
+- **包含内容**:
+  - RobotCfg: 机器人配置列表（支持多机器人）
+  - ObjectCfg: 场景物体配置（位置、物理属性）
+  - DRConfig: 域随机化配置（0-3级）
+  - CameraCfg: 相机配置（可选）
+  - LightCfg: 灯光配置（可选）
+- **为什么需要**:
+  - **可扩展性**: 支持未来扩展到操作任务
+  - **域随机化**: 通过DRConfig控制测试难度
+  - **多机器人**: 支持多机器人协作评测
+  - **一致性**: 确保所有Episode使用相同的环境配置
+- **VLN任务中的应用**:
+  - VLN主要使用DRConfig进行域随机化
+  - RobotConfig通常是隐式的（标准导航Agent）
+  - ObjectConfig在纯导航任务中通常不需要
+- **示例**:
+  ```yaml
+  scenario_config:
+    robots: [{name: "default_agent", type: "navigation"}]
+    domain_randomization:
+      level: 2  # 场景+材质+灯光随机化
+    cameras:
+      - {name: "rgb", width: 640, height: 480}
+      - {name: "depth", width: 640, height: 480}
+  ```
+
+**RobotConfig（机器人配置）**
+- **是什么**: 单个机器人的完整配置定义
+- **包含内容**:
+  - 模型路径: URDF/USD/MJCF文件路径
+  - 物理属性: 关节限制、夹爪配置、质量
+  - 传感器配置: 相机、激光雷达等传感器位置
+  - 初始状态: 默认位置、旋转、关节角度
+  - 控制模式: 速度控制、位置控制、力矩控制
+- **为什么需要**:
+  - **任务适配**: 不同任务需要不同机器人
+  - **公平评测**: 确保所有参赛者面对相同的机器人约束
+  - **可扩展**: 支持多种机器人平台（Franka、Stretch、Spot等）
+- **VLN任务中的应用**:
+  - VLN通常使用标准化导航Agent（RobotConfig隐式）
+  - 动作空间固定（move_forward, turn_left, turn_right, stop）
+  - 传感器固定（RGB、Depth、GPS、Compass）
+- **操作任务中的应用**（参考RoboTwin/Roboverse）:
+  ```yaml
+  robot_config:
+    name: "franka_panda"
+    urdf_path: "robots/franka/urdf/franka_panda.urdf"
+    gripper_open_q: [0.04, 0.04]
+    gripper_close_q: [0.0, 0.0]
+    joint_limits:
+      franka_joint1: [-2.89, 2.89]
+      franka_joint2: [-1.76, 1.76]
+    ee_body_name: "franka_hand"
+  ```
+
+**ObjectConfig（物体配置）**
+- **是什么**: 场景中可操作或不可操作物体的配置
+- **包含内容**:
+  - 基础属性: 名称、类型、位置、旋转、缩放
+  - 物理属性: 质量、摩擦系数、弹性系数
+  - 几何属性: 网格模型、基础形状（立方体、球体、圆柱体）
+  - 碰撞属性: 是否启用碰撞、碰撞类别
+- **为什么需要**:
+  - **操作任务**: 定义目标物体、障碍物、工具
+  - **任务多样性**: 通过物体配置创造不同场景
+  - **物理真实性**: 确保物体行为符合物理规律
+- **VLN任务中的应用**:
+  - 纯导航任务通常不需要ObjectConfig
+  - 可选用于定义障碍物或路标
+- **操作任务中的应用**（参考RoboTwin）:
+  ```yaml
+  object_config:
+    - name: "target_cube"
+      type: "MeshObjCfg"
+      mesh_path: "objects/cube.obj"
+      position: [0.5, 0.0, 0.2]
+      mass: 0.1
+      friction: 0.5
+    - name: "table"
+      type: "PrimitiveCubeCfg"
+      size: [1.0, 0.6, 0.05]
+      position: [0.0, 0.0, 0.0]
+      fixed: true  # 固定不动
+  ```
+
+**DRConfig（域随机化配置）**
+- **是什么**: 控制域随机化程度和方式的配置
+- **设计参考**: Roboverse的4级域随机化系统
+- **随机化级别**:
+  | 级别 | 场景 | 材质 | 灯光 | 相机 | 测试目标 |
+  |------|------|------|------|------|----------|
+  | **0** | ❌ | ❌ | ❌ | ❌ | 标准评测能力 |
+  | **1** | ✅ | ✅ | ❌ | ❌ | 场景泛化能力 |
+  | **2** | ✅ | ✅ | ✅ | ❌ | 光照鲁棒性 |
+  | **3** | ✅ | ✅ | ✅ | ✅ | 视角不变性 |
+- **为什么需要**:
+  - **泛化测试**: 评估模型在不同环境下的鲁棒性
+  - **公平性**: 统一的随机化协议确保公平对比
+  - **可配置**: 根据任务需求调整随机化强度
+- **VLN任务中的应用**:
+  - Level 0: 标准VLN评测（R2R val_seen/unseen）
+  - Level 1-2: 测试模型对环境变化的泛化能力
+  - Level 3: 测试视角不变性（最困难）
+- **配置示例**:
+  ```yaml
+  domain_randomization:
+    level: 2
+    scene_mode: 1  # USD Table模式
+    random_textures: true
+    random_lighting: true
+    random_camera: false
+    seed: 42  # 可复现的随机种子
+  ```
+
 #### 1.4.6 概念与代码映射
 
 | 概念 | 类/模块 | 文件位置 |
 |------|---------|----------|
 | Benchmark | `BenchmarkConfig` | `core/config/` |
 | Task | `Task`, `TaskRegistry` | `tasks/` |
+| ScenarioConfig | `ScenarioConfig` | `core/scenario/` |
+| RobotConfig | `RobotConfig` | `core/scenario/robot.py` |
+| ObjectConfig | `BaseObjCfg`, `MeshObjCfg`, `PrimitiveCubeCfg` | `core/scenario/objects.py` |
+| DRConfig | `DRConfig`, `DomainRandomizationManager` | `core/randomization/` |
 | Episode | `Episode` | `dataset/episode.py` |
 | Scene Dataset | `SceneDataset`, `SceneManager` | `simulator/scene/` |
 | Task Dataset | `TaskDataset`, `DatasetLoader` | `dataset/dataset.py` |
@@ -608,6 +750,18 @@ Configuration (配置概念的实现)
 │   │   ├─ actions: Action Space定义
 │   │   ├─ sensors: Sensor Suite配置
 │   │   └─ metrics: Metric集合
+│   ├─ ScenarioConfig (场景配置概念的参数化)
+│   │   ├─ RobotConfig: 机器人配置列表
+│   │   │   ├─ model_type: 机器人类型
+│   │   │   ├─ action_space: 动作空间类型
+│   │   │   └─ sensors: 机器人传感器配置
+│   │   ├─ ObjectConfig: 物体配置列表（可选）
+│   │   │   ├─ objects: 物体类型和位置
+│   │   │   └─ obstacles: 障碍物配置
+│   │   └─ DRConfig: 域随机化配置
+│   │       ├─ level: 随机化级别 (0-3)
+│   │       ├─ scene_mode: 场景模式
+│   │       └─ seed: 随机种子
 │   ├─ Dataset Config (Dataset概念的参数化)
 │   │   ├─ data_path: Dataset文件路径
 │   │   ├─ split: 数据集split
@@ -622,7 +776,8 @@ Configuration (配置概念的实现)
 │       └─ save_observations
 └── Simulator Config (Simulator概念的参数化)
     ├─ backend: 仿真器后端
-    └─ sensors: 传感器配置
+    ├─ rendering: 渲染配置
+    └─ physics: 物理引擎配置
 ```
 
 ---
@@ -951,8 +1106,15 @@ class VLNAgent:
 nav_eval/
 ├── core/                   # 核心组件
 │   ├── interfaces         # 抽象接口定义
+│   ├── scenario          # 场景配置
+│   │   ├── scenario.py   # ScenarioCfg
+│   │   ├── robot.py      # RobotCfg
+│   │   ├── objects.py    # ObjectCfg
+│   │   └── cameras.py    # CameraCfg
 │   ├── environment        # 评测环境
 │   ├── orchestrator      # 评测编排器
+│   ├── randomization     # 域随机化
+│   │   └── dr_manager.py # DomainRandomizationManager
 │   └── registry          # 组件注册表
 │
 ├── simulator/             # 仿真引擎
@@ -1004,10 +1166,14 @@ nav_eval_sdk/             # 参赛者SDK
 configs/                 # 配置文件
 ├── tasks/               # 任务配置
 ├── benchmarks/          # 基准配置
+├── scenarios/           # 场景配置
+│   ├── robots/          # 机器人配置
+│   └── objects/         # 物体配置
 └── simulator/           # 仿真器配置
 
 data/                    # 数据目录
-└── datasets/            # 数据集
+├── scene_datasets/      # 场景数据集
+└── datasets/            # 任务数据集
 
 tests/                   # 测试套件
 └── ...
@@ -1020,6 +1186,8 @@ examples/                # 使用示例
 
 | 代码目录 | 对应概念 | 说明 |
 |----------|----------|------|
+| `core/scenario/` | ScenarioConfig, RobotConfig, ObjectConfig | 场景配置概念实现 |
+| `core/randomization/` | DRConfig, DomainRandomizationManager | 域随机化实现 |
 | `tasks/` | Task | Task概念实现 |
 | `benchmarks/` | Benchmark | Benchmark概念实现 |
 | `dataset/` | Dataset, Episode | Dataset和Episode概念实现 |
@@ -1080,58 +1248,150 @@ task:
   actions: ["stop", "move_forward", "turn_left", "turn_right"]
   metrics: ["success", "spl", "navigation_error", "dtw"]
 
+# 场景配置（新增，参考RoboTwin/Roboverse设计）
+scenario_config:
+  # 机器人配置（VLN使用标准导航Agent）
+  robots:
+    - name: "default_agent"
+      type: "navigation"
+      action_space: "discrete"  #离散动作空间
+      height: 0.25  # Agent高度
+      radius: 0.1   # Agent半径
+      sensors:
+        rgb: {width: 640, height: 480, position: [0, 0, 1.2]}
+        depth: {width: 640, height: 480, position: [0, 0, 1.2]}
+        gps: {}
+        compass: {}
+
+  # 物体配置（VLN任务中通常为空）
+  objects: []
+
+  # 域随机化配置（参考Roboverse 4级系统）
+  domain_randomization:
+    level: 2  # 场景+材质+灯光随机化
+    scene_mode: 0  # 手动几何模式
+    random_textures: true
+    random_lighting: true
+    random_camera: false
+    seed: null  # null表示完全随机
+
+  # 相机配置
+  cameras:
+    - name: "rgb"
+      type: "pinhole"
+      width: 640
+      height: 480
+      fov: 60
+      position: [0, 0, 1.2]
+      look_at: [0, 0, 0]
+
+# 仿真器配置
 simulator:
   backend: "custom"
-  sensors:
-    rgb: {width: 640, height: 480}
-    depth: {width: 640, height: 480}
-    instruction: {}
-    gps: {}
-    compass: {}
+  rendering:
+    render_mode: "rgb"
+    render_quality: "high"
+  physics:
+    gravity: [0, 0, -9.81]
+    step_frequency: 60
 
+# 数据集配置
 dataset:
   type: "vln"
   data_path: "data/datasets/vln/R2R/val_seen.json.gz"
+  scene_dataset_path: "data/scene_datasets/hm3d_v0.2"
 
+# 评测参数
 evaluation:
   max_steps: 500
   success_distance: 0.2
+  timeout: 300  # 秒
 
+# Agent服务配置
 agent_service:
   type: "remote"
   protocol: "grpc"
   endpoint: "localhost:8085"
   timeout: 30
 
+# 输出配置
 output:
   log_dir: "logs/evaluations"
   save_trajectories: true
+  save_observations: false
+  save_videos: true
+```
+
+### 配置说明
+
+**场景配置 (scenario_config)** - 新增模块:
+| 配置项 | VLN任务 | 操作任务（扩展） |
+|--------|---------|----------------|
+| **robots** | 标准导航Agent（隐式） | 多机器人配置（Franka、Spot等） |
+| **objects** | 空（无需物体） | 目标物体、障碍物、工具配置 |
+| **domain_randomization** | Level 0-2 | Level 0-3（含相机随机化） |
+| **cameras** | 标准RGB+Depth | 多相机配置（手腕、头部等） |
+
+**域随机化级别 (level)**:
+- **Level 0**: 无随机化 - 标准VLN评测
+- **Level 1**: 场景+材质随机化 - 测试场景泛化
+- **Level 2**: +灯光随机化 - 测试光照鲁棒性
+- **Level 3**: +相机随机化 - 测试视角不变性
+
+### 扩展性示例 - 未来操作任务
+
+```yaml
+# 操作任务配置（参考RoboTwin模式）
+scenario_config:
+  robots:
+    - name: "franka"
+      type: "manipulation"
+      urdf_path: "robots/franka/panda.urdf"
+      gripper: "panda_gripper"
+      sensors:
+        wrist_camera: {width: 256, height: 256}
+
+  objects:
+    - name: "target_cube"
+      type: "MeshObjCfg"
+      mesh_path: "objects/cube.obj"
+      position: [0.5, 0.0, 0.2]
+      mass: 0.1
+
+  domain_randomization:
+    level: 3  # 包含相机随机化
+    clutter_scene: true  # 添加干扰物体
 ```
 
 ---
 
 ## 10. 与Habitat的对比
 
-| 方面 | Habitat | 本系统 |
-|------|---------|--------|
-| 仿真引擎 | Habitat-sim (C++) | 独立实现 |
-| Agent运行 | 同进程/Docker | 独立服务（API） |
-| 评测模式 | Local + Remote (gRPC) | Remote (REST/gRPC) |
-| 扩展性 | Registry模式 | Registry模式 |
-| 配置系统 | Hydra | Hydra风格 |
-| 数据格式 | JSON.gz | JSON.gz（兼容） |
+| 方面 | Habitat | 本系统 | 设计参考 |
+|------|---------|--------|----------|
+| 仿真引擎 | Habitat-sim (C++) | 独立实现 | - |
+| Agent运行 | 同进程/Docker | 独立服务（API） | - |
+| 评测模式 | Local + Remote (gRPC) | Remote (REST/gRPC) | - |
+| 扩展性 | Registry模式 | Registry模式 | ✅ |
+| 配置系统 | Hydra | Hydra风格 | ✅ |
+| 数据格式 | JSON.gz | JSON.gz（兼容） | ✅ |
+| 场景配置 | 嵌入Task配置 | 独立ScenarioConfig | ✅ RoboTwin/Roboverse |
+| 域随机化 | 内置随机化 | 4级DRConfig系统 | ✅ Roboverse |
 
 **设计借鉴**：
 - ✅ Measure接口模式（reset/update/get）
 - ✅ Episode数据格式
 - ✅ Registry注册机制
 - ✅ 分层配置系统
+- ✅ ScenarioCfg结构（RoboTwin/Roboverse）
 
 **设计差异**：
 - ✅ 独立仿真引擎
 - ✅ 参赛者服务化部署
 - ✅ REST + gRPC双协议
 - ✅ 更简洁的SDK接口
+- ✅ 统一的场景配置抽象（ScenarioConfig）
+- ✅ 4级域随机化系统（DRConfig）
 
 ---
 
