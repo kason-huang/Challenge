@@ -57,10 +57,9 @@ configs/
 │   └── vln.yaml              # VLN任务基础配置（动作空间、传感器、指标）
 │
 ├── benchmarks/
-│   ├── vln_base.yaml         # VLN基准模板（抽象基类）
-│   ├── vln_val_seen.yaml     # val_seen split具体实现
-│   ├── vln_val_unseen.yaml   # val_unseen split具体实现
-│   └── vln_test.yaml         # test split具体实现
+│   ├── vln_val_seen.yaml     # val_seen split配置
+│   ├── vln_val_unseen.yaml   # val_unseen split配置
+│   └── vln_test.yaml         # test split配置
 │
 └── simulator/
     └── default.yaml          # 仿真器默认配置（独立于benchmark）
@@ -134,24 +133,33 @@ task:
       type: "angle"  # angle / vector
 
   # 评测指标
-  metrics:
-    - success
-    - spl
-    - soft_spl
-    - navigation_error
-    - dtw
+  measurements:
+    distance_to_goal:
+      type: DistanceToGoal
+      distance_to: POINT
+    success:
+      type: Success
+      success_distance: 3.0
+    spl:
+      type: SPL
+    oracle_success:
+      type: OracleSuccess
+      # success_distance: 3.0
+    oracle_navigation_error:
+      type: OracleNavigationError
 ```
 
-### 4.2 基础Benchmark模板 (configs/benchmarks/vln_base.yaml)
+### 4.2 Benchmark配置 (configs/benchmarks/vln_val_seen.yaml)
 
-定义VLN benchmark的通用配置，作为具体split的父类。
+定义VLN benchmark的完整配置。
 
 ```yaml
 benchmark:
   # Benchmark元数据
-  name: "VLN Base Benchmark"
-  description: "VLN任务基准模板"
+  name: "VLN Challenge 2024 - val_seen"
+  description: "VLN任务验证集seen场景"
   version: "1.0"
+  tags: ["vln", "r2r", "val_seen"]
 
   # 引用任务配置
   task: "vln"
@@ -159,52 +167,15 @@ benchmark:
   # 数据集配置
   dataset:
     type: "vln"
-    format: "r2r"  # r2r / rxr / speaker_change
-    data_path: null  # 子类必须覆盖
-    scene_path: "data/scene_datasets/"
-    split: null  # 子类必须覆盖
-    episodes: null  # null=全部episode，可指定数量
-
-  # 评测配置
-  evaluation:
-    max_steps: 500
-    success_distance: 0.2  # meters
-    stop_threshold: 0.2
-    timeout: 30  # seconds per episode
-
-  # 输出配置
-  output:
-    log_dir: "logs/evaluations"
-    save_trajectories: true
-    save_observations: false
-    save_video: false
-```
-
-### 4.3 具体Benchmark配置 (configs/benchmarks/vln_val_seen.yaml)
-
-基于vln_base的具体实现，覆盖必要字段。
-
-```yaml
-benchmark:
-  # 继承基础配置
-  extends: "vln_base"
-
-  # Benchmark元数据
-  name: "VLN Challenge 2024 - val_seen"
-  description: "VLN任务验证集seen场景"
-  version: "1.0"
-  tags: ["vln", "r2r", "val_seen"]
-
-  # 覆盖数据集配置
-  dataset:
-    type: "vln"
-    format: "r2r"
-    data_path: "data/datasets/vln/R2R/val_seen.json.gz"
+    data_path: "data/datasets/vln/R2R/{split}/{split}.json.gz"
     scene_path: "data/scene_datasets/"
     split: "val_seen"
-    episodes: null  # 使用全部episode
 
-  # 覆盖输出配置
+  # 评测配置
+  environment:
+    max_episode_steps: 500
+
+  # 输出配置
   output:
     log_dir: "logs/evaluations/vln_val_seen"
     save_trajectories: true
@@ -220,7 +191,6 @@ benchmark:
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `extends` | string | 否 | 继承的父benchmark名称 |
 | `name` | string | 是 | Benchmark名称 |
 | `description` | string | 否 | Benchmark描述 |
 | `version` | string | 是 | 配置版本号 |
@@ -386,22 +356,19 @@ Action在配置中的定义位置：
 ## 10. 配置加载流程
 
 ```
-1. 加载基准配置文件 (vln_val_seen.yaml)
-   └─> 读取 extends: "vln_base"
-
-2. 加载父配置 (vln_base.yaml)
+1. 加载Benchmark配置文件 (vln_val_seen.yaml)
    └─> 读取 task: "vln"
 
-3. 加载任务配置 (tasks/vln.yaml)
-   └─> 获取 actions, sensors, metrics
+2. 加载任务配置 (tasks/vln.yaml)
+   └─> 获取 actions, sensors, measurements
 
-4. 合并配置（子配置覆盖父配置）
-   └─> data_path, log_dir等字段覆盖
-
-5. 配置验证
+3. 配置验证
    ├─> 检查必填字段
    ├─> 验证数据路径存在性
    └─> 验证动作/传感器/指标的有效性
+
+4. 构建运行时配置
+   └─> 合并 task + benchmark 配置
 ```
 
 ---
@@ -423,15 +390,24 @@ task:
 
 ### 11.2 新增Benchmark
 
-继承现有base或直接创建：
+直接创建完整配置：
 
 ```yaml
 # configs/benchmarks/objectnav_gibson.yaml
 benchmark:
-  extends: "objectnav_base"
   name: "ObjectNav Gibson"
+  task: "objectnav"
   dataset:
+    type: "objectnav"
     data_path: "data/datasets/objectnav/gibson/val.json.gz"
+    scene_path: "data/scene_datasets/"
+    split: "val"
+  evaluation:
+    max_steps: 500
+    success_distance: 0.2
+  output:
+    log_dir: "logs/evaluations/objectnav_gibson"
+    save_trajectories: true
 ```
 
 ### 11.3 新增指标
@@ -453,7 +429,6 @@ metrics:
 
 ```yaml
 benchmark:
-  extends: "vln_base"
   name: "VLN Challenge 2024 - val_seen"
   description: "VLN任务验证集seen场景"
   version: "1.0"
@@ -486,13 +461,28 @@ benchmark:
 
 ```yaml
 benchmark:
-  extends: "vln_base"
   name: "VLN Quick Test"
+  description: "VLN快速测试（100个episode）"
+  version: "1.0"
+
+  task: "vln"
+
   dataset:
+    type: "vln"
+    format: "r2r"
     data_path: "data/datasets/vln/R2R/val_seen.json.gz"
+    scene_path: "data/scene_datasets/"
+    split: "val_seen"
     episodes: 100  # 只评测100个episode
+
   evaluation:
     max_steps: 100  # 减少最大步数
+    success_distance: 0.2
+    timeout: 30
+
+  output:
+    log_dir: "logs/evaluations/vln_quick_test"
+    save_trajectories: true
 ```
 
 ---
@@ -503,12 +493,12 @@ benchmark:
 
 | 领域概念 | 配置项 | 配置文件 |
 |----------|--------|----------|
-| **Task** | task (actions, sensors, metrics) | configs/tasks/vln.yaml |
+| **Task** | task (actions, sensors, measurements) | configs/tasks/vln.yaml |
 | **Benchmark** | benchmark (name, dataset, evaluation) | configs/benchmarks/*.yaml |
 | **Dataset** | dataset | configs/benchmarks/*.yaml |
 | **Action** | task.actions | configs/tasks/vln.yaml |
 | **Sensor** | task.sensors | configs/tasks/vln.yaml |
-| **Metric** | task.metrics | configs/tasks/vln.yaml |
+| **Metric** | task.measurements | configs/tasks/vln.yaml |
 | **Observation** | sensors输出格式 | 文档第7.2节定义 |
 | **Simulator** | simulator | configs/simulator/default.yaml |
 | **Evaluation** | evaluation | configs/benchmarks/*.yaml |
