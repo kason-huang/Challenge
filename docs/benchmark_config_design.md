@@ -81,30 +81,24 @@ task:
   # 动作空间配置
   actions:
     - name: "stop"
-      type: "discrete"
 
     - name: "move_forward"
-      type: "discrete"
       params:
         step_size: 0.25  # meters
 
     - name: "turn_left"
-      type: "discrete"
       params:
         turn_angle: 15  # degrees
 
     - name: "turn_right"
-      type: "discrete"
       params:
         turn_angle: 15
 
     - name: "look_up"
-      type: "discrete"
       params:
         tilt_angle: 15
 
     - name: "look_down"
-      type: "discrete"
       params:
         tilt_angle: 15
 
